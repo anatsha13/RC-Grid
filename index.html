@@ -174,6 +174,7 @@ nav {
 .badge-upcoming { background:rgba(46,204,113,0.12); color:var(--green); }
 .badge-past     { background:rgba(122,128,144,0.12); color:var(--sub); }
 .badge-enrolled { background:rgba(244,185,66,0.12);  color:var(--gold); }
+.badge-owner    { background:rgba(100,160,255,0.12); color:#64a0ff; }
 
 /* ── BUTTONS ── */
 .btn {
@@ -425,6 +426,7 @@ tr:hover td { background:rgba(255,255,255,0.02); }
       <button class="nav-btn active" onclick="showView('events')">Events</button>
       <button class="nav-btn" onclick="showView('tracks')">By Track</button>
       <button class="nav-btn" onclick="showView('my-entries')">My Entries</button>
+      <button class="nav-btn" id="my-tracks-nav-btn" style="display:none" onclick="showView('my-tracks')">🏟 My Tracks</button>
       <button class="nav-btn" id="admin-nav-btn" style="display:none" onclick="showView('admin')">⚙ Admin</button>
     </div>
     <div class="nav-right">
@@ -466,6 +468,18 @@ tr:hover td { background:rgba(255,255,255,0.02); }
     <div id="my-entries-list"></div>
   </div>
 
+  <!-- MY TRACKS VIEW (track owners + admins) -->
+  <div class="view" id="view-my-tracks">
+    <div class="page-header">
+      <h2>My Tracks</h2>
+      <p>Tracks you own — create and manage events at each venue</p>
+    </div>
+    <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem;">
+      <button class="btn btn-primary" onclick="openTrackModal()">+ New Track</button>
+    </div>
+    <div id="my-tracks-list"><div class="loading-center"><div class="spinner"></div></div></div>
+  </div>
+
   <!-- ADMIN VIEW -->
   <div class="view" id="view-admin">
     <div class="page-header">
@@ -505,7 +519,7 @@ tr:hover td { background:rgba(255,255,255,0.02); }
       <div class="table-wrap">
         <table>
           <thead>
-            <tr><th>Driver</th><th>Email</th><th>Role</th><th>Actions</th></tr>
+          <tr><th>User</th><th>Email</th><th>Role</th><th>Actions</th></tr>
           </thead>
           <tbody id="admin-users-body">
             <tr><td colspan="4"><div class="loading-center"><div class="spinner"></div></div></td></tr>
@@ -517,6 +531,33 @@ tr:hover td { background:rgba(255,255,255,0.02); }
 </div>
 
 <!-- ══ MODALS ══════════════════════════════════════════════════════════ -->
+
+<!-- Track Form Modal -->
+<div class="modal-overlay" id="track-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="track-modal-title">New Track</h3>
+      <button class="modal-close" onclick="closeModal('track-modal')">✕</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Track Name</label>
+      <input id="tr-name" type="text" class="form-control" placeholder="e.g. Silverstone Circuit">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Location</label>
+      <input id="tr-location" type="text" class="form-control" placeholder="e.g. Northamptonshire, UK">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Description (optional)</label>
+      <textarea id="tr-desc" class="form-control" rows="3" placeholder="Track length, surface type, facilities…"></textarea>
+    </div>
+    <input type="hidden" id="tr-id">
+    <div style="display:flex;gap:0.75rem;justify-content:flex-end;margin-top:1.5rem">
+      <button class="btn btn-outline" onclick="closeModal('track-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveTrack()">Save Track</button>
+    </div>
+  </div>
+</div>
 
 <!-- Event Form Modal -->
 <div class="modal-overlay" id="event-modal">
@@ -531,6 +572,8 @@ tr:hover td { background:rgba(255,255,255,0.02); }
     </div>
     <div class="form-group">
       <label class="form-label">Track</label>
+      <!-- Admins get free-text; track owners see only their tracks -->
+      <select id="ev-track-select" class="form-control" style="display:none"></select>
       <input id="ev-track" type="text" class="form-control" placeholder="e.g. Silverstone Circuit" list="tracks-datalist">
       <datalist id="tracks-datalist"></datalist>
     </div>
@@ -599,10 +642,13 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db   = firebase.firestore();
 
-// Email link sign-in settings
-// The URL must be in your Firebase Console → Authentication → Authorized domains
+// Email link sign-in settings.
+// Set this to your GitHub Pages URL, e.g. "https://yourusername.github.io/your-repo/"
+// This MUST also be added to Firebase Console → Authentication → Authorized domains.
+const APP_URL = "https://anatsha13.github.io/RC-Grid/";
+
 const actionCodeSettings = {
-  url: window.location.href,   // returns to this same page after clicking the link
+  url: APP_URL,
   handleCodeInApp: true
 };
 
@@ -618,7 +664,9 @@ let currentUser = null;
 let currentUserData = null;
 let allEvents = [];
 let allEnrollments = [];
+let allTracks = [];
 let currentEditEventId = null;
+let currentEditTrackId = null;
 
 /* ── TOAST ── */
 function toast(msg, type='info') {
@@ -685,9 +733,15 @@ function showApp() {
   document.getElementById('app').style.display = 'block';
   const email = currentUser.email || '';
   const role  = currentUserData?.role || 'driver';
-  document.getElementById('nav-user-display').innerHTML =
-    `${email} &nbsp;<em>${role}</em>`;
-  if (role === 'admin') document.getElementById('admin-nav-btn').style.display = 'inline-flex';
+  const roleLabel = { admin:'admin', track_owner:'track owner', driver:'driver' }[role] || role;
+  document.getElementById('nav-user-display').innerHTML = `${email} &nbsp;<em>${roleLabel}</em>`;
+  if (role === 'admin') {
+    document.getElementById('admin-nav-btn').style.display = 'inline-flex';
+    document.getElementById('my-tracks-nav-btn').style.display = 'inline-flex';
+  }
+  if (role === 'track_owner') {
+    document.getElementById('my-tracks-nav-btn').style.display = 'inline-flex';
+  }
   showView('events');
   subscribeData();
 }
@@ -733,18 +787,22 @@ function showView(name) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('view-' + name)?.classList.add('active');
-  const btnMap = { events:0, tracks:1, 'my-entries':2, admin:3 };
+  const btnMap = { events:0, tracks:1, 'my-entries':2, 'my-tracks':3, admin:4 };
   const btns = document.querySelectorAll('.nav-btn');
   if (btnMap[name] !== undefined) btns[btnMap[name]]?.classList.add('active');
 
-  if (name === 'tracks') renderTracksView();
+  if (name === 'tracks')     renderTracksView();
   if (name === 'my-entries') renderMyEntries();
-  if (name === 'admin') renderAdminView();
+  if (name === 'my-tracks')  renderMyTracksView();
+  if (name === 'admin')      renderAdminView();
   if (name === 'admin-users') renderAdminUsers();
 }
 
 /* ── REALTIME SUBSCRIPTIONS ── */
 function subscribeData() {
+  db.collection('tracks').orderBy('name','asc').onSnapshot(snap => {
+    allTracks = snap.docs.map(d => ({ id:d.id, ...d.data() }));
+  });
   db.collection('events').orderBy('date','asc').onSnapshot(snap => {
     allEvents = snap.docs.map(d => ({ id:d.id, ...d.data() }));
     renderEventsGrid();
@@ -773,6 +831,20 @@ function enrollCount(eventId) {
 }
 function isEnrolled(eventId) {
   return !!allEnrollments.find(e => e.eventId === eventId && e.userId === currentUser?.uid);
+}
+// Can the current user create/edit/delete events?
+function canManageEvent(ev) {
+  const role = currentUserData?.role;
+  if (role === 'admin') return true;
+  if (role === 'track_owner') {
+    // They can manage events on tracks they own
+    const track = allTracks.find(t => t.name === ev?.track);
+    return track && track.ownerId === currentUser?.uid;
+  }
+  return false;
+}
+function canManageAnyEvent() {
+  return currentUserData?.role === 'admin' || currentUserData?.role === 'track_owner';
 }
 
 /* ── EVENTS GRID ── */
@@ -917,7 +989,7 @@ async function openDetailModal(eventId) {
           <div class="enrollee-name">${u.displayName || '—'}</div>
           <div class="enrollee-email">${u.email || ''}</div>
         </div>
-        ${currentUserData?.role==='admin' ? `<button class="btn btn-danger btn-sm" style="margin-left:auto" onclick="adminRemoveEnrollment('${e.id}')">Remove</button>` : ''}
+        ${canManageEvent(ev) ? `<button class="btn btn-danger btn-sm" style="margin-left:auto" onclick="adminRemoveEnrollment('${e.id}')">Remove</button>` : ''}
       </div>`;
   }).join('') : `<p class="text-sub">No drivers enrolled yet.</p>`;
 
@@ -945,7 +1017,7 @@ async function openDetailModal(eventId) {
           ? `<div class="text-sub" style="text-align:center">This event is full.</div>`
           : `<div class="text-sub" style="text-align:center">This event has passed.</div>`
     }
-    ${currentUserData?.role==='admin' ? `
+    ${currentUserData?.role==='admin' || canManageEvent(ev) ? `
       <div style="display:flex;gap:0.5rem;margin-top:0.75rem">
         <button class="btn btn-outline w-full" onclick="closeModal('detail-modal');openEventModal('${eventId}')">Edit Event</button>
         <button class="btn btn-danger w-full" onclick="deleteEvent('${eventId}')">Delete</button>
@@ -1015,8 +1087,9 @@ function renderAdminView() {
       <td>
         <div style="display:flex;gap:0.4rem">
           <button class="btn btn-outline btn-sm" onclick="openDetailModal('${ev.id}')">View</button>
+          ${canManageEvent(ev) ? `
           <button class="btn btn-outline btn-sm" onclick="openEventModal('${ev.id}')">Edit</button>
-          <button class="btn btn-danger btn-sm" onclick="deleteEvent('${ev.id}')">Delete</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteEvent('${ev.id}')">Delete</button>` : ''}
         </div>
       </td>
     </tr>`).join('');
@@ -1026,34 +1099,59 @@ function renderAdminView() {
 function openEventModal(eventId = null) {
   currentEditEventId = eventId;
   document.getElementById('event-modal-title').textContent = eventId ? 'Edit Event' : 'New Event';
+  const role = currentUserData?.role;
+  const isOwner = role === 'track_owner';
+  const myTracks = isOwner
+    ? allTracks.filter(t => t.ownerId === currentUser?.uid)
+    : [];
+
+  // Show the right track input
+  const trackSelect = document.getElementById('ev-track-select');
+  const trackInput  = document.getElementById('ev-track');
+  if (isOwner) {
+    trackSelect.style.display = 'block';
+    trackInput.style.display  = 'none';
+    trackSelect.innerHTML = myTracks.length
+      ? myTracks.map(t => `<option value="${t.name}">${t.name}</option>`).join('')
+      : `<option value="">No tracks yet — create one first</option>`;
+  } else {
+    trackSelect.style.display = 'none';
+    trackInput.style.display  = 'block';
+    // Populate datalist with all known tracks
+    const trackNames = [...new Set(allEvents.map(e=>e.track))];
+    document.getElementById('tracks-datalist').innerHTML = trackNames.map(t=>`<option value="${t}">`).join('');
+  }
+
   if (eventId) {
     const ev = allEvents.find(e => e.id === eventId);
     if (ev) {
       document.getElementById('ev-name').value     = ev.name || '';
-      document.getElementById('ev-track').value    = ev.track || '';
       document.getElementById('ev-category').value = ev.category || '';
       document.getElementById('ev-max').value      = ev.maxEntries || 0;
       document.getElementById('ev-desc').value     = ev.description || '';
+      if (isOwner) trackSelect.value = ev.track || '';
+      else         trackInput.value  = ev.track || '';
       if (ev.date) {
         const d = ev.date.toDate ? ev.date.toDate() : new Date(ev.date);
         document.getElementById('ev-date').value = d.toISOString().slice(0,16);
       }
     }
   } else {
-    ['ev-name','ev-track','ev-date','ev-desc'].forEach(id => document.getElementById(id).value='');
+    ['ev-name','ev-date','ev-desc'].forEach(id => document.getElementById(id).value='');
+    if (!isOwner) trackInput.value = '';
     document.getElementById('ev-category').value = '';
     document.getElementById('ev-max').value = 0;
   }
-  // Populate tracks datalist
-  const tracks = [...new Set(allEvents.map(e=>e.track))];
-  document.getElementById('tracks-datalist').innerHTML = tracks.map(t=>`<option value="${t}">`).join('');
   closeModal('detail-modal');
   openModal('event-modal');
 }
 
 async function saveEvent() {
   const name     = document.getElementById('ev-name').value.trim();
-  const track    = document.getElementById('ev-track').value.trim();
+  const isOwner  = currentUserData?.role === 'track_owner';
+  const track    = isOwner
+    ? document.getElementById('ev-track-select').value.trim()
+    : document.getElementById('ev-track').value.trim();
   const category = document.getElementById('ev-category').value;
   const dateVal  = document.getElementById('ev-date').value;
   const maxEnt   = parseInt(document.getElementById('ev-max').value) || 0;
@@ -1072,6 +1170,7 @@ async function saveEvent() {
       toast('Event updated.','success');
     } else {
       data.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+      data.ownerId   = currentUser.uid;
       await db.collection('events').add(data);
       toast('Event created! 🏁','success');
     }
@@ -1093,40 +1192,169 @@ async function deleteEvent(eventId) {
   } catch(e) { toast(e.message,'error'); }
 }
 
+/* ── MY TRACKS VIEW ── */
+function renderMyTracksView() {
+  const isAdmin = currentUserData?.role === 'admin';
+  const myTracks = isAdmin
+    ? allTracks
+    : allTracks.filter(t => t.ownerId === currentUser?.uid);
+  const container = document.getElementById('my-tracks-list');
+
+  if (!myTracks.length) {
+    container.innerHTML = `<div class="empty"><div class="empty-icon">🏟</div>No tracks yet. Create your first track!</div>`;
+    return;
+  }
+  container.innerHTML = myTracks.map(tr => {
+    const trackEvents = allEvents.filter(e => e.name && e.track === tr.name);
+    return `
+      <div class="card" style="margin-bottom:1rem">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:0.5rem;margin-bottom:1rem">
+          <div>
+            <div style="font-family:var(--font-head);font-size:1.8rem;line-height:1">${tr.name}</div>
+            ${tr.location ? `<div class="meta-item mt1">${iconPin()} ${tr.location}</div>` : ''}
+            ${tr.description ? `<p class="text-sub mt1" style="font-size:0.82rem">${tr.description}</p>` : ''}
+          </div>
+          <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" onclick="openEventModal();setTrackForNewEvent('${tr.name}')">+ New Event</button>
+            <button class="btn btn-outline btn-sm" onclick="openTrackModal('${tr.id}')">Edit</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteTrack('${tr.id}','${tr.name}')">Delete</button>
+          </div>
+        </div>
+        ${trackEvents.length ? `
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Event</th><th>Category</th><th>Date</th><th>Entries</th><th></th></tr></thead>
+              <tbody>
+                ${trackEvents.map(ev => `
+                  <tr>
+                    <td><strong>${ev.name}</strong></td>
+                    <td><span class="badge" style="background:rgba(244,185,66,0.1);color:var(--gold)">${ev.category}</span></td>
+                    <td style="font-family:var(--font-mono);font-size:0.78rem">${fmtDate(ev.date)}</td>
+                    <td>${enrollCount(ev.id)}${ev.maxEntries ? ' / '+ev.maxEntries : ''}</td>
+                    <td>
+                      <div style="display:flex;gap:0.35rem">
+                        <button class="btn btn-outline btn-sm" onclick="openDetailModal('${ev.id}')">View</button>
+                        <button class="btn btn-outline btn-sm" onclick="openEventModal('${ev.id}')">Edit</button>
+                        <button class="btn btn-danger btn-sm" onclick="deleteEvent('${ev.id}')">Del</button>
+                      </div>
+                    </td>
+                  </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>` : `<p class="text-sub" style="font-size:0.85rem">No events at this track yet.</p>`}
+      </div>`;
+  }).join('');
+}
+
+/* ── TRACK MODAL ── */
+function openTrackModal(trackId = null) {
+  currentEditTrackId = trackId;
+  document.getElementById('track-modal-title').textContent = trackId ? 'Edit Track' : 'New Track';
+  if (trackId) {
+    const tr = allTracks.find(t => t.id === trackId);
+    if (tr) {
+      document.getElementById('tr-name').value     = tr.name || '';
+      document.getElementById('tr-location').value = tr.location || '';
+      document.getElementById('tr-desc').value     = tr.description || '';
+    }
+  } else {
+    ['tr-name','tr-location','tr-desc'].forEach(id => document.getElementById(id).value = '');
+  }
+  openModal('track-modal');
+}
+
+async function saveTrack() {
+  const name     = document.getElementById('tr-name').value.trim();
+  const location = document.getElementById('tr-location').value.trim();
+  const desc     = document.getElementById('tr-desc').value.trim();
+  if (!name) return toast('Track name is required.','error');
+  const data = {
+    name, location, description: desc,
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+  try {
+    if (currentEditTrackId) {
+      await db.collection('tracks').doc(currentEditTrackId).update(data);
+      toast('Track updated.','success');
+    } else {
+      data.ownerId   = currentUser.uid;
+      data.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+      await db.collection('tracks').add(data);
+      toast('Track created! 🏟','success');
+    }
+    closeModal('track-modal');
+    renderMyTracksView();
+  } catch(e) { toast(e.message,'error'); }
+}
+
+async function deleteTrack(trackId, trackName) {
+  if (!confirm(`Delete "${trackName}" and all its events and enrollments?`)) return;
+  try {
+    const evSnap  = await db.collection('events').where('track','==',trackName).get();
+    const batch   = db.batch();
+    for (const evDoc of evSnap.docs) {
+      const enrSnap = await db.collection('enrollments').where('eventId','==',evDoc.id).get();
+      enrSnap.docs.forEach(d => batch.delete(d.ref));
+      batch.delete(evDoc.ref);
+    }
+    batch.delete(db.collection('tracks').doc(trackId));
+    await batch.commit();
+    toast('Track deleted.','info');
+    renderMyTracksView();
+  } catch(e) { toast(e.message,'error'); }
+}
+
+// Helper: after opening a new event modal from My Tracks, pre-select the track
+function setTrackForNewEvent(trackName) {
+  const sel = document.getElementById('ev-track-select');
+  const inp = document.getElementById('ev-track');
+  if (sel.style.display !== 'none') sel.value = trackName;
+  else inp.value = trackName;
+}
+
 /* ── ADMIN USERS ── */
 async function renderAdminUsers() {
   const tbody = document.getElementById('admin-users-body');
   tbody.innerHTML = `<tr><td colspan="4"><div class="loading-center"><div class="spinner"></div></div></td></tr>`;
   const snap = await db.collection('users').orderBy('createdAt','asc').get();
   if (snap.empty) { tbody.innerHTML=`<tr><td colspan="4"><div class="empty">No users yet.</div></td></tr>`; return; }
+  const roleBadge = r => ({
+    admin:       `<span class="badge badge-enrolled">admin</span>`,
+    track_owner: `<span class="badge badge-owner">track owner</span>`,
+    driver:      `<span class="badge badge-upcoming">driver</span>`,
+  }[r] || `<span class="badge">${r}</span>`);
+
   tbody.innerHTML = snap.docs.map(d => {
     const u = d.data();
+    const isSelf = d.id === currentUser?.uid;
     return `
       <tr>
         <td>${u.displayName||'—'}</td>
         <td style="font-family:var(--font-mono);font-size:0.78rem">${u.email}</td>
-        <td><span class="badge ${u.role==='admin'?'badge-enrolled':'badge-upcoming'}">${u.role||'driver'}</span></td>
+        <td>${roleBadge(u.role||'driver')}</td>
         <td>
-          ${d.id !== currentUser?.uid ? `
-          <button class="btn btn-outline btn-sm" onclick="toggleRole('${u.email}','${u.role}')">
-            ${u.role==='admin' ? 'Demote to Driver' : 'Promote to Admin'}
-          </button>` : `<span class="text-sub">You</span>`}
+          ${isSelf ? `<span class="text-sub">You</span>` : `
+          <select class="form-control" style="width:auto;padding:0.3rem 0.6rem;font-size:0.8rem"
+            onchange="setRole('${u.email}', this.value, this)">
+            <option value="driver"      ${u.role==='driver'      ?'selected':''}>Driver</option>
+            <option value="track_owner" ${u.role==='track_owner' ?'selected':''}>Track Owner</option>
+            <option value="admin"       ${u.role==='admin'       ?'selected':''}>Admin</option>
+          </select>`}
         </td>
       </tr>`;
   }).join('');
 }
 
-async function toggleRole(email, currentRole) {
-  const newRole = currentRole === 'admin' ? 'driver' : 'admin';
-  if (!confirm(`Change ${email} to ${newRole}?`)) return;
+async function setRole(email, newRole, selectEl) {
   try {
-    // Find the user doc by email
     const snap = await db.collection('users').where('email','==',email).limit(1).get();
     if (snap.empty) return toast('User not found.','error');
     await snap.docs[0].ref.update({ role: newRole });
-    toast(`User updated to ${newRole}.`, 'success');
-    renderAdminUsers();
-  } catch(e) { toast(e.message, 'error'); }
+    toast(`${email} is now a ${newRole.replace('_',' ')}.`,'success');
+  } catch(e) {
+    toast(e.message,'error');
+    renderAdminUsers(); // reset the dropdown
+  }
 }
 
 /* ── MODAL HELPERS ── */
@@ -1146,6 +1374,7 @@ function strColor(str) {
 /* ── SVG ICONS ── */
 function iconTrack(s=14) { return `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>`; }
 function iconCal(s=14)   { return `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`; }
+function iconPin(s=14)   { return `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>`; }
 </script>
 </body>
 </html>

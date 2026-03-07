@@ -91,7 +91,8 @@ nav {
   font-size:0.875rem; font-weight:500;
   padding: 0.4rem 0.85rem; border-radius: var(--radius);
   cursor:pointer; transition: all 0.15s;
-  letter-spacing:0.02em;
+  letter-spacing:0.02em; line-height:1.4;
+  display:inline-flex; align-items:center;
 }
 .nav-btn:hover { color: var(--text); background: var(--border); }
 .nav-btn.active { color: var(--red); background: rgba(230,57,70,0.12); }
@@ -229,6 +230,35 @@ th {
 td { padding:0.75rem 1rem; border-bottom:1px solid var(--border); vertical-align:middle; }
 tr:last-child td { border-bottom:none; }
 tr:hover td { background:rgba(255,255,255,0.02); }
+
+/* ── EVENTS TOOLBAR ── */
+.events-toolbar { margin-bottom:1.5rem; }
+.view-toggle {
+  display:inline-flex; background:var(--dark); border:1px solid var(--border);
+  border-radius:var(--radius); padding:3px; gap:2px;
+}
+.view-toggle-btn {
+  background:none; border:none; color:var(--sub);
+  font-family:var(--font-body); font-size:0.82rem; font-weight:600;
+  padding:0.35rem 1rem; border-radius:calc(var(--radius) - 2px);
+  cursor:pointer; transition:all 0.15s; letter-spacing:0.02em;
+}
+.view-toggle-btn:hover { color:var(--text); }
+.view-toggle-btn.active { background:var(--red); color:#fff; }
+
+/* ── INNER TABS (My Racing) ── */
+.inner-tabs {
+  display:flex; gap:0; margin-bottom:1.5rem;
+  border-bottom:1px solid var(--border);
+}
+.inner-tab {
+  background:none; border:none; border-bottom:2px solid transparent;
+  color:var(--sub); font-family:var(--font-body); font-size:0.9rem; font-weight:600;
+  padding:0.6rem 1.25rem; cursor:pointer; transition:all 0.15s;
+  margin-bottom:-1px;
+}
+.inner-tab:hover { color:var(--text); }
+.inner-tab.active { color:var(--red); border-bottom-color:var(--red); }
 
 /* ── TRACK TABS ── */
 .track-tabs { display:flex; gap:0.5rem; flex-wrap:wrap; margin-bottom:1.5rem; }
@@ -452,10 +482,8 @@ tr:hover td { background:rgba(255,255,255,0.02); }
     <a class="nav-logo" href="#">🏁 <span>RACE</span>ENTRY</a>
     <div class="nav-links">
       <button class="nav-btn active" onclick="showView('events')">Events</button>
-      <button class="nav-btn" onclick="showView('tracks')">By Track</button>
-      <button class="nav-btn" onclick="showView('my-entries')">My Entries</button>
-      <button class="nav-btn" id="my-tracks-nav-btn" style="display:none" onclick="showView('my-tracks')">🏟 My Tracks</button>
-      <button class="nav-btn" id="admin-nav-btn" style="display:none" onclick="showView('admin')">⚙ Admin</button>
+      <button class="nav-btn" onclick="showView('my-racing')">My Racing</button>
+      <button class="nav-btn" id="admin-nav-btn" style="display:none" onclick="showView('admin')">Admin</button>
     </div>
     <div class="nav-right">
       <span class="nav-user" id="nav-user-display"></span>
@@ -466,46 +494,45 @@ tr:hover td { background:rgba(255,255,255,0.02); }
   <!-- EVENTS VIEW -->
   <div class="view active" id="view-events">
     <div class="page-header">
-      <h2>Upcoming Events</h2>
+      <h2>Events</h2>
       <p>Browse and enroll in upcoming race events</p>
     </div>
-    <div class="stats" id="events-stats"></div>
-    <div class="grid-3" id="events-grid">
+    <div class="events-toolbar">
+      <div class="view-toggle">
+        <button class="view-toggle-btn active" id="toggle-all" onclick="setEventsMode('all')">All Events</button>
+        <button class="view-toggle-btn" id="toggle-track" onclick="setEventsMode('track')">By Track</button>
+      </div>
+      <div id="track-filter-row" style="display:none;margin-top:1rem">
+        <div class="track-tabs" id="track-tabs" style="margin-bottom:0"></div>
+      </div>
+    </div>
+    <div id="events-grid">
       <div class="loading-center"><div class="spinner"></div></div>
     </div>
   </div>
 
-  <!-- TRACKS VIEW -->
-  <div class="view" id="view-tracks">
+  <!-- MY RACING VIEW (combined: my entries + my tracks) -->
+  <div class="view" id="view-my-racing">
     <div class="page-header">
-      <h2>Events by Track</h2>
-      <p>Select a track to view all scheduled events</p>
+      <h2>My Racing</h2>
+      <p>Your enrollments and tracks in one place</p>
     </div>
-    <div class="track-tabs" id="track-tabs"></div>
-    <div id="track-events-container">
-      <div class="loading-center"><div class="spinner"></div></div>
+    <!-- Tab switcher inside the view -->
+    <div class="inner-tabs" id="my-racing-tabs">
+      <button class="inner-tab active" id="tab-my-entries" onclick="switchMyRacingTab('entries')">My Entries</button>
+      <button class="inner-tab" id="tab-my-tracks" onclick="switchMyRacingTab('tracks')">My Tracks</button>
     </div>
-  </div>
-
-  <!-- MY ENTRIES VIEW -->
-  <div class="view" id="view-my-entries">
-    <div class="page-header">
-      <h2>My Entries</h2>
-      <p>Events you have enrolled in</p>
+    <!-- My Entries panel -->
+    <div id="my-racing-entries">
+      <div id="my-entries-list"></div>
     </div>
-    <div id="my-entries-list"></div>
-  </div>
-
-  <!-- MY TRACKS VIEW (track owners + admins) -->
-  <div class="view" id="view-my-tracks">
-    <div class="page-header">
-      <h2>My Tracks</h2>
-      <p>Tracks you own — create and manage events at each venue</p>
+    <!-- My Tracks panel -->
+    <div id="my-racing-tracks" style="display:none">
+      <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem;">
+        <button class="btn btn-primary" onclick="openTrackModal()">+ New Track</button>
+      </div>
+      <div id="my-tracks-list"><div class="loading-center"><div class="spinner"></div></div></div>
     </div>
-    <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem;">
-      <button class="btn btn-primary" onclick="openTrackModal()">+ New Track</button>
-    </div>
-    <div id="my-tracks-list"><div class="loading-center"><div class="spinner"></div></div></div>
   </div>
 
   <!-- ADMIN VIEW -->
@@ -614,8 +641,8 @@ tr:hover td { background:rgba(255,255,255,0.02); }
       <div id="ev-classes-hidden"></div>
     </div>
     <div class="form-group">
-      <label class="form-label">Date & Time</label>
-      <input id="ev-date" type="datetime-local" class="form-control">
+      <label class="form-label">Date</label>
+      <input id="ev-date" type="date" class="form-control">
     </div>
     <div class="form-group">
       <label class="form-label">Max Entries (0 = unlimited)</label>
@@ -758,8 +785,6 @@ function showApp() {
   const role  = currentUserData?.role || 'driver';
   const roleLabel = { admin:'admin', track_owner:'track owner', driver:'driver' }[role] || role;
   document.getElementById('nav-user-display').innerHTML = `${email} &nbsp;<em>${roleLabel}</em>`;
-  // Everyone can create and manage their own tracks
-  document.getElementById('my-tracks-nav-btn').style.display = 'inline-flex';
   if (role === 'admin') {
     document.getElementById('admin-nav-btn').style.display = 'inline-flex';
   }
@@ -808,14 +833,13 @@ function showView(name) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('view-' + name)?.classList.add('active');
-  const btnMap = { events:0, tracks:1, 'my-entries':2, 'my-tracks':3, admin:4 };
+  // Highlight correct nav button
+  const btnMap = { events: 0, 'my-racing': 1, admin: 2 };
   const btns = document.querySelectorAll('.nav-btn');
   if (btnMap[name] !== undefined) btns[btnMap[name]]?.classList.add('active');
 
-  if (name === 'tracks')     renderTracksView();
-  if (name === 'my-entries') renderMyEntries();
-  if (name === 'my-tracks')  renderMyTracksView();
-  if (name === 'admin')      renderAdminView();
+  if (name === 'my-racing')   { renderMyEntries(); renderMyTracksView(); }
+  if (name === 'admin')       renderAdminView();
   if (name === 'admin-users') renderAdminUsers();
 }
 
@@ -849,13 +873,13 @@ function subscribeData() {
 function fmtDate(ts) {
   if (!ts) return '—';
   const d = ts.toDate ? ts.toDate() : new Date(ts);
-  return d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) +
-         ' ' + d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+  return d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
 }
 function isFuture(ts) {
   if (!ts) return false;
   const d = ts.toDate ? ts.toDate() : new Date(ts);
-  return d > new Date();
+  const today = new Date(); today.setHours(0,0,0,0);
+  return d >= today;
 }
 // Total unique drivers enrolled across all categories for an event
 function enrollCount(eventId) {
@@ -888,26 +912,56 @@ function canManageAnyEvent() {
 }
 
 /* ── EVENTS GRID ── */
-function renderEventsGrid() {
-  const grid = document.getElementById('events-grid');
-  const upcoming = allEvents.filter(e => isFuture(e.date));
-  const past     = allEvents.filter(e => !isFuture(e.date));
+let eventsMode = 'all'; // 'all' | 'track'
+let selectedTrack = null;
 
-  document.getElementById('events-stats').innerHTML = `
-    <div class="stat-card"><div class="stat-val text-red">${upcoming.length}</div><div class="stat-label">Upcoming Events</div></div>
-    <div class="stat-card"><div class="stat-val">${allEnrollments.filter(e=>e.userId===currentUser?.uid).length}</div><div class="stat-label">My Entries</div></div>
-    <div class="stat-card"><div class="stat-val">${[...new Set(allEvents.map(e=>e.track))].length}</div><div class="stat-label">Tracks</div></div>
-  `;
-
-  const sorted = [...upcoming, ...past];
-  if (!sorted.length) {
-    grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="empty-icon">🏁</div>No events scheduled yet.</div>`;
-    return;
-  }
-  grid.innerHTML = sorted.map(ev => eventCard(ev)).join('');
+function setEventsMode(mode) {
+  eventsMode = mode;
+  document.getElementById('toggle-all').classList.toggle('active', mode === 'all');
+  document.getElementById('toggle-track').classList.toggle('active', mode === 'track');
+  document.getElementById('track-filter-row').style.display = mode === 'track' ? 'block' : 'none';
+  if (mode === 'track') buildTrackTabs();
+  renderEventsGrid();
 }
 
-function eventCard(ev) {
+function buildTrackTabs() {
+  const tracks = [...new Set(allEvents.map(e => e.track).filter(Boolean))].sort();
+  if (!selectedTrack && tracks.length) selectedTrack = tracks[0];
+  const tabs = document.getElementById('track-tabs');
+  if (!tabs) return;
+  tabs.innerHTML = tracks.map(t =>
+    `<button class="track-tab${t===selectedTrack?' active':''}" onclick="selectTrack('${t}')">${t}</button>`
+  ).join('');
+}
+
+function selectTrack(track) {
+  selectedTrack = track;
+  document.querySelectorAll('.track-tab').forEach(b => {
+    b.classList.toggle('active', b.textContent === track);
+  });
+  renderEventsGrid();
+}
+
+function updateTracks() {
+  if (eventsMode === 'track') buildTrackTabs();
+}
+
+function renderEventsGrid() {
+  const grid = document.getElementById('events-grid');
+  let events;
+  if (eventsMode === 'track' && selectedTrack) {
+    events = allEvents.filter(e => e.track === selectedTrack);
+  } else {
+    const upcoming = allEvents.filter(e => isFuture(e.date));
+    const past     = allEvents.filter(e => !isFuture(e.date));
+    events = [...upcoming, ...past];
+  }
+  if (!events.length) {
+    grid.innerHTML = `<div class="grid-3"><div class="empty" style="grid-column:1/-1"><div class="empty-icon">🏁</div>${eventsMode==='track'&&selectedTrack?`No events at ${selectedTrack} yet.`:'No events scheduled yet.'}</div></div>`;
+    return;
+  }
+  grid.innerHTML = `<div class="grid-3">${events.map(ev => eventCard(ev)).join('')}</div>`;
+}
   const future   = isFuture(ev.date);
   const enrolled = isEnrolled(ev.id);
   const count    = enrollCount(ev.id);
@@ -934,34 +988,13 @@ function eventCard(ev) {
     </div>`;
 }
 
-/* ── TRACKS VIEW ── */
-let selectedTrack = null;
-function updateTracks() {
-  const tracks = [...new Set(allEvents.map(e => e.track))].sort();
-  const tabs = document.getElementById('track-tabs');
-  if (!tabs) return;
-  if (!selectedTrack && tracks.length) selectedTrack = tracks[0];
-  tabs.innerHTML = tracks.map(t =>
-    `<button class="track-tab${t===selectedTrack?' active':''}" onclick="selectTrack('${t}')">${t}</button>`
-  ).join('');
-}
-function selectTrack(track) {
-  selectedTrack = track;
-  document.querySelectorAll('.track-tab').forEach(b => {
-    b.classList.toggle('active', b.textContent === track);
-  });
-  renderTrackEvents();
-}
-function renderTracksView() {
-  updateTracks();
-  renderTrackEvents();
-}
-function renderTrackEvents() {
-  const c = document.getElementById('track-events-container');
-  if (!selectedTrack) { c.innerHTML = `<div class="empty"><div class="empty-icon">🏎️</div>No tracks found.</div>`; return; }
-  const evs = allEvents.filter(e => e.track === selectedTrack);
-  if (!evs.length) { c.innerHTML = `<div class="empty"><div class="empty-icon">📋</div>No events at ${selectedTrack}.</div>`; return; }
-  c.innerHTML = `<div class="grid-3">${evs.map(ev => eventCard(ev)).join('')}</div>`;
+/* ── MY RACING TABS ── */
+function switchMyRacingTab(tab) {
+  const isEntries = tab === 'entries';
+  document.getElementById('my-racing-entries').style.display = isEntries ? 'block' : 'none';
+  document.getElementById('my-racing-tracks').style.display  = isEntries ? 'none' : 'block';
+  document.getElementById('tab-my-entries').classList.toggle('active', isEntries);
+  document.getElementById('tab-my-tracks').classList.toggle('active', !isEntries);
 }
 
 /* ── MY ENTRIES ── */
@@ -1280,7 +1313,11 @@ function openEventModal(eventId = null) {
       else trackInput.value = ev.track || '';
       if (ev.date) {
         const d = ev.date.toDate ? ev.date.toDate() : new Date(ev.date);
-        document.getElementById('ev-date').value = d.toISOString().slice(0,16);
+        // format as YYYY-MM-DD for <input type="date">
+        const yyyy = d.getFullYear();
+        const mm   = String(d.getMonth()+1).padStart(2,'0');
+        const dd   = String(d.getDate()).padStart(2,'0');
+        document.getElementById('ev-date').value = `${yyyy}-${mm}-${dd}`;
       }
       // Restore classes
       const cats = Array.isArray(ev.categories) ? ev.categories : (ev.category ? [ev.category] : []);
@@ -1314,7 +1351,7 @@ async function saveEvent() {
 
   const data = {
     name, track, categories,
-    date: firebase.firestore.Timestamp.fromDate(new Date(dateVal)),
+    date: firebase.firestore.Timestamp.fromDate(new Date(dateVal + 'T00:00:00')),
     maxEntries: maxEnt,
     description: desc,
     updatedAt: firebase.firestore.FieldValue.serverTimestamp()

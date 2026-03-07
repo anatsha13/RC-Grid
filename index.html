@@ -355,16 +355,33 @@ tr:hover td { background:rgba(255,255,255,0.02); }
 
 .loading-center { display:flex; justify-content:center; padding:4rem; }
 
-/* ── CATEGORY CHECKBOXES ── */
-.cat-checkbox-row {
-  display:flex; align-items:center; gap:0.6rem;
-  padding:0.45rem 0.75rem; border-radius:var(--radius);
-  border:1px solid var(--border); background:var(--dark);
-  cursor:pointer; font-size:0.875rem; font-weight:500;
-  transition: border-color 0.15s;
+/* ── CLASS TAG INPUT ── */
+.tag-input-wrap {
+  display:flex; flex-wrap:wrap; gap:0.4rem;
+  padding:0.5rem; border:1px solid var(--border); border-radius:var(--radius);
+  background:var(--dark); min-height:44px; align-items:center;
+  transition: border-color 0.15s; cursor:text;
 }
-.cat-checkbox-row:hover { border-color: var(--red); }
-.cat-checkbox-row input[type=checkbox] { accent-color:var(--red); width:15px; height:15px; flex-shrink:0; }
+.tag-input-wrap:focus-within { border-color:var(--red); }
+.tag-chip {
+  display:inline-flex; align-items:center; gap:0.3rem;
+  background:rgba(244,185,66,0.12); color:var(--gold);
+  border:1px solid rgba(244,185,66,0.25); border-radius:999px;
+  padding:0.2rem 0.6rem; font-size:0.8rem; font-weight:600;
+  white-space:nowrap;
+}
+.tag-chip button {
+  background:none; border:none; color:var(--gold); cursor:pointer;
+  font-size:0.85rem; line-height:1; padding:0 0.1rem;
+  opacity:0.7; transition:opacity 0.1s;
+}
+.tag-chip button:hover { opacity:1; }
+.tag-input-field {
+  background:none; border:none; outline:none;
+  color:var(--text); font-family:var(--font-body); font-size:0.875rem;
+  flex:1; min-width:120px; padding:0.1rem 0.2rem;
+}
+.tag-input-field::placeholder { color:var(--muted); }
 
 /* ── MISC ── */
 .divider { border:none; border-top:1px solid var(--border); margin:1.5rem 0; }
@@ -507,7 +524,7 @@ tr:hover td { background:rgba(255,255,255,0.02); }
         <table id="admin-events-table">
           <thead>
             <tr>
-              <th>Event</th><th>Track</th><th>Category</th>
+              <th>Event</th><th>Track</th><th>Classes</th>
               <th>Date</th><th>Enrollees</th><th>Actions</th>
             </tr>
           </thead>
@@ -589,19 +606,12 @@ tr:hover td { background:rgba(255,255,255,0.02); }
       <datalist id="tracks-datalist"></datalist>
     </div>
     <div class="form-group">
-      <label class="form-label">Categories <span style="color:var(--sub);font-weight:400;text-transform:none;letter-spacing:0">(select all that apply)</span></label>
-      <div style="display:flex;flex-direction:column;gap:0.35rem">
-        <label class="cat-checkbox-row"><input type="checkbox" class="ev-cat-cb" value="Nitro"> Nitro</label>
-        <label class="cat-checkbox-row"><input type="checkbox" class="ev-cat-cb" value="Electric"> Electric</label>
-        <label class="cat-checkbox-row"><input type="checkbox" class="ev-cat-cb" value="Truggy"> Truggy</label>
-        <label class="cat-checkbox-row"><input type="checkbox" class="ev-cat-cb" value="BYO"> BYO</label>
-        <label class="cat-checkbox-row">
-          <input type="checkbox" class="ev-cat-cb" value="Custom" onchange="document.getElementById('ev-custom-cat-wrap').style.display=this.checked?'block':'none'"> Custom…
-        </label>
-        <div id="ev-custom-cat-wrap" style="display:none;padding-left:1.5rem;margin-top:0.25rem">
-          <input id="ev-custom-cat" type="text" class="form-control" placeholder="e.g. 40+, Vintage, Beginner…">
-        </div>
+      <label class="form-label">Classes <span style="color:var(--sub);font-weight:400;text-transform:none;letter-spacing:0">(type a name and press Enter)</span></label>
+      <div class="tag-input-wrap" id="ev-classes-wrap" onclick="document.getElementById('ev-class-input').focus()">
+        <!-- chips injected here by JS -->
+        <input id="ev-class-input" class="tag-input-field" type="text" placeholder="e.g. Nitro, 40+, Truggy…" autocomplete="off">
       </div>
+      <div id="ev-classes-hidden"></div>
     </div>
     <div class="form-group">
       <label class="form-label">Date & Time</label>
@@ -856,7 +866,7 @@ function enrollCount(eventId) {
 function myEnrollmentsForEvent(eventId) {
   return allEnrollments.filter(e => e.eventId === eventId && e.userId === currentUser?.uid);
 }
-// Is the current user enrolled in at least one category of this event?
+// Is the current user enrolled in at least one class of this event?
 function isEnrolled(eventId) {
   return myEnrollmentsForEvent(eventId).length > 0;
 }
@@ -1013,7 +1023,7 @@ async function openDetailModal(eventId) {
     if (u.exists) userMap[uid] = u.data();
   }));
 
-  // Build per-category enrollee list
+  // Build per-class enrollee list
   const enrolleesByCat = {};
   cats.forEach(c => enrolleesByCat[c] = []);
   enrollees.forEach(e => {
@@ -1049,7 +1059,7 @@ async function openDetailModal(eventId) {
     if (unenrolledCats.length > 0) {
       enrollSection += `
         <div style="margin-bottom:1rem">
-          <div class="form-label" style="margin-bottom:0.5rem">Enroll in categories:</div>
+          <div class="form-label" style="margin-bottom:0.5rem">Enroll in classes:</div>
           <div id="enroll-cats" style="display:flex;flex-direction:column;gap:0.4rem">
             ${unenrolledCats.map(cat => `
               <label style="display:flex;align-items:center;gap:0.6rem;cursor:pointer;padding:0.5rem 0.75rem;background:var(--dark);border-radius:var(--radius);border:1px solid var(--border)">
@@ -1063,7 +1073,7 @@ async function openDetailModal(eventId) {
     if (myEnrolledCats.length > 0) {
       enrollSection += `
         <div>
-          <div class="form-label" style="margin-bottom:0.5rem">Your enrollments:</div>
+          <div class="form-label" style="margin-bottom:0.5rem">Your classes:</div>
           ${myEnrs.map(enr => `
             <div style="display:flex;align-items:center;justify-content:space-between;padding:0.5rem 0.75rem;background:var(--dark);border-radius:var(--radius);border:1px solid var(--border);margin-bottom:0.4rem">
               <span class="badge badge-enrolled">✓ ${enr.category}</span>
@@ -1072,7 +1082,7 @@ async function openDetailModal(eventId) {
         </div>`;
     }
     if (!unenrolledCats.length && !myEnrolledCats.length) {
-      enrollSection = `<p class="text-sub" style="text-align:center">No categories available.</p>`;
+      enrollSection = `<p class="text-sub" style="text-align:center">No classes available.</p>`;
     }
   } else {
     enrollSection = `<p class="text-sub" style="text-align:center">This event has passed.</p>`;
@@ -1106,7 +1116,7 @@ async function openDetailModal(eventId) {
 async function enrollSelected(eventId) {
   if (!currentUser) return;
   const checked = [...document.querySelectorAll('#enroll-cats input[type=checkbox]:checked')];
-  if (!checked.length) return toast('Select at least one category.', 'error');
+  if (!checked.length) return toast('Select at least one class.', 'error');
   try {
     const batch = db.batch();
     checked.forEach(cb => {
@@ -1125,7 +1135,7 @@ async function enrollSelected(eventId) {
 }
 
 async function unenroll(enrollmentId, eventName, category) {
-  if (!confirm(`Withdraw from ${category} at ${eventName}?`)) return;
+  if (!confirm(`Withdraw from class "${category}" at ${eventName}?`)) return;
   try {
     await db.collection('enrollments').doc(enrollmentId).delete();
     toast(`Withdrawn from ${category}.`, 'info');
@@ -1134,7 +1144,7 @@ async function unenroll(enrollmentId, eventName, category) {
 }
 
 async function adminRemoveEnrollment(enrollmentId, eventId) {
-  if (!confirm('Remove this driver from this category?')) return;
+  if (!confirm('Remove this driver from this class?')) return;
   await db.collection('enrollments').doc(enrollmentId).delete();
   toast('Enrollment removed.', 'info');
   // Re-open the detail modal to refresh the view
@@ -1176,6 +1186,65 @@ function renderAdminView() {
     </tr>`}).join('');
 }
 
+/* ── CLASS TAG INPUT ── */
+let _classTags = [];
+
+function setClassTags(tags) {
+  _classTags = [...tags];
+  renderClassTags();
+}
+
+function getClassTags() {
+  return [..._classTags];
+}
+
+function renderClassTags() {
+  const wrap  = document.getElementById('ev-classes-wrap');
+  const input = document.getElementById('ev-class-input');
+  // Remove existing chips (leave the input element)
+  wrap.querySelectorAll('.tag-chip').forEach(c => c.remove());
+  _classTags.forEach((tag, i) => {
+    const chip = document.createElement('span');
+    chip.className = 'tag-chip';
+    chip.innerHTML = `${tag}<button type="button" onclick="removeClassTag(${i})" title="Remove">×</button>`;
+    wrap.insertBefore(chip, input);
+  });
+}
+
+function addClassTag(val) {
+  const name = val.trim();
+  if (!name) return;
+  if (_classTags.map(t=>t.toLowerCase()).includes(name.toLowerCase())) return; // no duplicates
+  _classTags.push(name);
+  renderClassTags();
+}
+
+function removeClassTag(i) {
+  _classTags.splice(i, 1);
+  renderClassTags();
+}
+
+// Wire up keyboard events once DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+  const input = document.getElementById('ev-class-input');
+  if (!input) return;
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      addClassTag(input.value);
+      input.value = '';
+    } else if (e.key === 'Backspace' && input.value === '' && _classTags.length) {
+      removeClassTag(_classTags.length - 1);
+    }
+  });
+  input.addEventListener('blur', () => {
+    if (input.value.trim()) {
+      addClassTag(input.value);
+      input.value = '';
+    }
+  });
+});
+
 /* ── EVENT MODAL ── */
 function openEventModal(eventId = null) {
   currentEditEventId = eventId;
@@ -1198,10 +1267,8 @@ function openEventModal(eventId = null) {
     document.getElementById('tracks-datalist').innerHTML = trackNames.map(t=>`<option value="${t}">`).join('');
   }
 
-  // Reset categories
-  document.querySelectorAll('.ev-cat-cb').forEach(cb => cb.checked = false);
-  document.getElementById('ev-custom-cat').value = '';
-  document.getElementById('ev-custom-cat-wrap').style.display = 'none';
+  // Reset classes tag input
+  setClassTags([]);
 
   if (eventId) {
     const ev = allEvents.find(e => e.id === eventId);
@@ -1215,19 +1282,9 @@ function openEventModal(eventId = null) {
         const d = ev.date.toDate ? ev.date.toDate() : new Date(ev.date);
         document.getElementById('ev-date').value = d.toISOString().slice(0,16);
       }
-      // Restore categories
+      // Restore classes
       const cats = Array.isArray(ev.categories) ? ev.categories : (ev.category ? [ev.category] : []);
-      const presets = ['Nitro','Electric','Truggy','BYO'];
-      cats.forEach(cat => {
-        const cb = document.querySelector(`.ev-cat-cb[value="${cat}"]`);
-        if (cb) cb.checked = true;
-        else if (!presets.includes(cat)) {
-          // It's a custom category
-          document.getElementById('ev-custom-cat').value = cat;
-          document.querySelector('.ev-cat-cb[value="Custom"]').checked = true;
-          document.getElementById('ev-custom-cat-wrap').style.display = 'block';
-        }
-      });
+      setClassTags(cats);
     }
   } else {
     ['ev-name','ev-date','ev-desc'].forEach(id => document.getElementById(id).value='');
@@ -1249,19 +1306,11 @@ async function saveEvent() {
   const maxEnt  = parseInt(document.getElementById('ev-max').value) || 0;
   const desc    = document.getElementById('ev-desc').value.trim();
 
-  // Collect categories
-  const categories = [];
-  document.querySelectorAll('.ev-cat-cb:checked').forEach(cb => {
-    if (cb.value === 'Custom') {
-      const custom = document.getElementById('ev-custom-cat').value.trim();
-      if (custom) categories.push(custom);
-    } else {
-      categories.push(cb.value);
-    }
-  });
+  // Collect classes from tag input
+  const categories = getClassTags();
 
   if (!name || !track || !dateVal) return toast('Please fill all required fields.', 'error');
-  if (!categories.length) return toast('Select at least one category.', 'error');
+  if (!categories.length) return toast('Add at least one class.', 'error');
 
   const data = {
     name, track, categories,
@@ -1328,7 +1377,7 @@ function renderMyTracksView() {
         ${trackEvents.length ? `
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Event</th><th>Category</th><th>Date</th><th>Entries</th><th></th></tr></thead>
+              <thead><tr><th>Event</th><th>Classes</th><th>Date</th><th>Entries</th><th></th></tr></thead>
               <tbody>
                 ${trackEvents.map(ev => {
                   const cats = Array.isArray(ev.categories) ? ev.categories : (ev.category ? [ev.category] : []);

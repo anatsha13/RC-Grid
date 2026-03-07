@@ -660,6 +660,7 @@ let currentUserData = null;
 let allEvents = [];
 let allEnrollments = [];
 let allTracks = [];
+let allUsers = [];
 let currentEditEventId = null;
 let currentEditTrackId = null;
 
@@ -797,15 +798,26 @@ function showView(name) {
 function subscribeData() {
   db.collection('tracks').orderBy('name','asc').onSnapshot(snap => {
     allTracks = snap.docs.map(d => ({ id:d.id, ...d.data() }));
+    renderMyTracksView();
   });
   db.collection('events').orderBy('date','asc').onSnapshot(snap => {
     allEvents = snap.docs.map(d => ({ id:d.id, ...d.data() }));
     renderEventsGrid();
     updateTracks();
+    renderAdminView();
+    renderMyTracksView();
   });
   db.collection('enrollments').onSnapshot(snap => {
     allEnrollments = snap.docs.map(d => ({ id:d.id, ...d.data() }));
     renderEventsGrid();
+    renderMyEntries();
+  });
+  db.collection('users').orderBy('createdAt','asc').onSnapshot(snap => {
+    allUsers = snap.docs.map(d => ({ id:d.id, ...d.data() }));
+    // Only re-render the users table if that view is currently open
+    if (document.getElementById('view-admin-users')?.classList.contains('active')) {
+      renderAdminUsers();
+    }
   });
 }
 
@@ -1308,20 +1320,20 @@ function setTrackForNewEvent(trackName) {
 }
 
 /* ── ADMIN USERS ── */
-async function renderAdminUsers() {
+function renderAdminUsers() {
   const tbody = document.getElementById('admin-users-body');
-  tbody.innerHTML = `<tr><td colspan="4"><div class="loading-center"><div class="spinner"></div></div></td></tr>`;
-  const snap = await db.collection('users').orderBy('createdAt','asc').get();
-  if (snap.empty) { tbody.innerHTML=`<tr><td colspan="4"><div class="empty">No users yet.</div></td></tr>`; return; }
+  if (!allUsers.length) {
+    tbody.innerHTML = `<tr><td colspan="4"><div class="empty">No users yet.</div></td></tr>`;
+    return;
+  }
   const roleBadge = r => ({
     admin:       `<span class="badge badge-enrolled">admin</span>`,
     track_owner: `<span class="badge badge-owner">track owner</span>`,
     driver:      `<span class="badge badge-upcoming">driver</span>`,
   }[r] || `<span class="badge">${r}</span>`);
 
-  tbody.innerHTML = snap.docs.map(d => {
-    const u = d.data();
-    const isSelf = d.id === currentUser?.uid;
+  tbody.innerHTML = allUsers.map(u => {
+    const isSelf = u.id === currentUser?.uid;
     return `
       <tr>
         <td>${u.displayName||'—'}</td>
@@ -1348,7 +1360,6 @@ async function setRole(email, newRole, selectEl) {
     toast(`${email} is now a ${newRole.replace('_',' ')}.`,'success');
   } catch(e) {
     toast(e.message,'error');
-    renderAdminUsers(); // reset the dropdown
   }
 }
 

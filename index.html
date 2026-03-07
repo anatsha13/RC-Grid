@@ -962,6 +962,8 @@ function renderEventsGrid() {
   }
   grid.innerHTML = `<div class="grid-3">${events.map(ev => eventCard(ev)).join('')}</div>`;
 }
+
+function eventCard(ev) {
   const future   = isFuture(ev.date);
   const enrolled = isEnrolled(ev.id);
   const count    = enrollCount(ev.id);

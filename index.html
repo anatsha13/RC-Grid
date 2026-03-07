@@ -892,13 +892,13 @@ function renderEventsGrid() {
   const grid = document.getElementById('events-grid');
   const upcoming = allEvents.filter(e => isFuture(e.date));
   const past     = allEvents.filter(e => !isFuture(e.date));
-
+/*
   document.getElementById('events-stats').innerHTML = `
     <div class="stat-card"><div class="stat-val text-red">${upcoming.length}</div><div class="stat-label">Upcoming Events</div></div>
     <div class="stat-card"><div class="stat-val">${allEnrollments.filter(e=>e.userId===currentUser?.uid).length}</div><div class="stat-label">My Entries</div></div>
     <div class="stat-card"><div class="stat-val">${[...new Set(allEvents.map(e=>e.track))].length}</div><div class="stat-label">Tracks</div></div>
   `;
-
+*/
   const sorted = [...upcoming, ...past];
   if (!sorted.length) {
     grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="empty-icon">🏁</div>No events scheduled yet.</div>`;

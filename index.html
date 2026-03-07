@@ -355,6 +355,17 @@ tr:hover td { background:rgba(255,255,255,0.02); }
 
 .loading-center { display:flex; justify-content:center; padding:4rem; }
 
+/* ── CATEGORY CHECKBOXES ── */
+.cat-checkbox-row {
+  display:flex; align-items:center; gap:0.6rem;
+  padding:0.45rem 0.75rem; border-radius:var(--radius);
+  border:1px solid var(--border); background:var(--dark);
+  cursor:pointer; font-size:0.875rem; font-weight:500;
+  transition: border-color 0.15s;
+}
+.cat-checkbox-row:hover { border-color: var(--red); }
+.cat-checkbox-row input[type=checkbox] { accent-color:var(--red); width:15px; height:15px; flex-shrink:0; }
+
 /* ── MISC ── */
 .divider { border:none; border-top:1px solid var(--border); margin:1.5rem 0; }
 .text-red { color:var(--red); }
@@ -578,13 +589,19 @@ tr:hover td { background:rgba(255,255,255,0.02); }
       <datalist id="tracks-datalist"></datalist>
     </div>
     <div class="form-group">
-      <label class="form-label">Category</label>
-      <select id="ev-category" class="form-control">
-        <option value="">Select category…</option>
-        <option value="Nitro">Nitro</option>
-        <option value="Truggy">Truggy</option>
-        <option value="Electric">Electric</option>
-      </select>
+      <label class="form-label">Categories <span style="color:var(--sub);font-weight:400;text-transform:none;letter-spacing:0">(select all that apply)</span></label>
+      <div style="display:flex;flex-direction:column;gap:0.35rem">
+        <label class="cat-checkbox-row"><input type="checkbox" class="ev-cat-cb" value="Nitro"> Nitro</label>
+        <label class="cat-checkbox-row"><input type="checkbox" class="ev-cat-cb" value="Electric"> Electric</label>
+        <label class="cat-checkbox-row"><input type="checkbox" class="ev-cat-cb" value="Truggy"> Truggy</label>
+        <label class="cat-checkbox-row"><input type="checkbox" class="ev-cat-cb" value="BYO"> BYO</label>
+        <label class="cat-checkbox-row">
+          <input type="checkbox" class="ev-cat-cb" value="Custom" onchange="document.getElementById('ev-custom-cat-wrap').style.display=this.checked?'block':'none'"> Custom…
+        </label>
+        <div id="ev-custom-cat-wrap" style="display:none;padding-left:1.5rem;margin-top:0.25rem">
+          <input id="ev-custom-cat" type="text" class="form-control" placeholder="e.g. 40+, Vintage, Beginner…">
+        </div>
+      </div>
     </div>
     <div class="form-group">
       <label class="form-label">Date & Time</label>
@@ -731,12 +748,10 @@ function showApp() {
   const role  = currentUserData?.role || 'driver';
   const roleLabel = { admin:'admin', track_owner:'track owner', driver:'driver' }[role] || role;
   document.getElementById('nav-user-display').innerHTML = `${email} &nbsp;<em>${roleLabel}</em>`;
+  // Everyone can create and manage their own tracks
+  document.getElementById('my-tracks-nav-btn').style.display = 'inline-flex';
   if (role === 'admin') {
     document.getElementById('admin-nav-btn').style.display = 'inline-flex';
-    document.getElementById('my-tracks-nav-btn').style.display = 'inline-flex';
-  }
-  if (role === 'track_owner') {
-    document.getElementById('my-tracks-nav-btn').style.display = 'inline-flex';
   }
   showView('events');
   subscribeData();
@@ -814,7 +829,6 @@ function subscribeData() {
   });
   db.collection('users').orderBy('createdAt','asc').onSnapshot(snap => {
     allUsers = snap.docs.map(d => ({ id:d.id, ...d.data() }));
-    // Only re-render the users table if that view is currently open
     if (document.getElementById('view-admin-users')?.classList.contains('active')) {
       renderAdminUsers();
     }
@@ -833,25 +847,34 @@ function isFuture(ts) {
   const d = ts.toDate ? ts.toDate() : new Date(ts);
   return d > new Date();
 }
+// Total unique drivers enrolled across all categories for an event
 function enrollCount(eventId) {
-  return allEnrollments.filter(e => e.eventId === eventId).length;
+  const uids = new Set(allEnrollments.filter(e => e.eventId === eventId).map(e => e.userId));
+  return uids.size;
 }
+// All enrollment docs for the current user in an event
+function myEnrollmentsForEvent(eventId) {
+  return allEnrollments.filter(e => e.eventId === eventId && e.userId === currentUser?.uid);
+}
+// Is the current user enrolled in at least one category of this event?
 function isEnrolled(eventId) {
-  return !!allEnrollments.find(e => e.eventId === eventId && e.userId === currentUser?.uid);
+  return myEnrollmentsForEvent(eventId).length > 0;
+}
+// Categories this user is enrolled in for an event
+function myEnrolledCategories(eventId) {
+  return myEnrollmentsForEvent(eventId).map(e => e.category);
 }
 // Can the current user create/edit/delete events?
 function canManageEvent(ev) {
-  const role = currentUserData?.role;
-  if (role === 'admin') return true;
-  if (role === 'track_owner') {
-    // They can manage events on tracks they own
-    const track = allTracks.find(t => t.name === ev?.track);
-    return track && track.ownerId === currentUser?.uid;
-  }
-  return false;
+  if (!currentUser) return false;
+  if (currentUserData?.role === 'admin') return true;
+  // Any user who owns the track this event belongs to
+  const track = allTracks.find(t => t.name === ev?.track);
+  return track && track.ownerId === currentUser.uid;
 }
 function canManageAnyEvent() {
-  return currentUserData?.role === 'admin' || currentUserData?.role === 'track_owner';
+  if (currentUserData?.role === 'admin') return true;
+  return allTracks.some(t => t.ownerId === currentUser?.uid);
 }
 
 /* ── EVENTS GRID ── */
@@ -878,28 +901,24 @@ function eventCard(ev) {
   const future   = isFuture(ev.date);
   const enrolled = isEnrolled(ev.id);
   const count    = enrollCount(ev.id);
-  const full     = ev.maxEntries > 0 && count >= ev.maxEntries;
+  const cats     = Array.isArray(ev.categories) ? ev.categories : (ev.category ? [ev.category] : []);
+  const enrolledCats = myEnrolledCategories(ev.id);
   return `
     <div class="event-card" onclick="openDetailModal('${ev.id}')">
       <div class="event-card-accent"></div>
       <div class="event-card-body">
-        <div class="event-card-cat">${ev.category || 'Race'}</div>
+        <div class="event-card-cat">${cats.join(' · ') || 'Race'}</div>
         <div class="event-card-name">${ev.name}</div>
         <div class="event-card-meta">
-          <span class="meta-item">
-            ${iconTrack()} ${ev.track}
-          </span>
-          <span class="meta-item">
-            ${iconCal()} ${fmtDate(ev.date)}
-          </span>
+          <span class="meta-item">${iconTrack()} ${ev.track}</span>
+          <span class="meta-item">${iconCal()} ${fmtDate(ev.date)}</span>
         </div>
         <div class="event-card-footer">
           <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
             ${future ? `<span class="badge badge-upcoming">● Upcoming</span>` : `<span class="badge badge-past">● Past</span>`}
-            ${enrolled ? `<span class="badge badge-enrolled">✓ Enrolled</span>` : ''}
-            ${full && !enrolled ? `<span class="badge" style="background:rgba(230,57,70,0.1);color:var(--red)">Full</span>` : ''}
+            ${enrolledCats.length ? `<span class="badge badge-enrolled">✓ ${enrolledCats.join(', ')}</span>` : ''}
           </div>
-          <span class="text-sub">${count}${ev.maxEntries ? '/'+ev.maxEntries : ''} entries</span>
+          <span class="text-sub">${count} drivers</span>
         </div>
       </div>
     </div>`;
@@ -943,20 +962,29 @@ function renderMyEntries() {
     container.innerHTML = `<div class="empty"><div class="empty-icon">🏁</div>You haven't enrolled in any events yet.<br><button class="btn btn-primary mt2" onclick="showView('events')">Browse Events</button></div>`;
     return;
   }
-  const rows = myEnrollments.map(enr => {
-    const ev = allEvents.find(e => e.id === enr.eventId);
+  // Group by event
+  const byEvent = {};
+  myEnrollments.forEach(enr => {
+    if (!byEvent[enr.eventId]) byEvent[enr.eventId] = [];
+    byEvent[enr.eventId].push(enr);
+  });
+  const rows = Object.entries(byEvent).map(([eventId, enrs]) => {
+    const ev = allEvents.find(e => e.id === eventId);
     if (!ev) return '';
     const future = isFuture(ev.date);
     return `
       <div class="card" style="margin-bottom:0.75rem">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:0.5rem">
-          <div>
-            <div style="font-family:var(--font-head);font-size:1.4rem">${ev.name}</div>
-            <div class="meta-item mt1">${iconTrack()} ${ev.track} &nbsp;&nbsp; ${iconCal()} ${fmtDate(ev.date)}</div>
-            <div class="mt1"><span class="badge" style="background:rgba(244,185,66,0.1);color:var(--gold);">${ev.category}</span>
-            &nbsp;${future ? `<span class="badge badge-upcoming">● Upcoming</span>` : `<span class="badge badge-past">● Past</span>`}</div>
-          </div>
-          ${future ? `<button class="btn btn-danger btn-sm" onclick="unenroll('${enr.id}','${ev.name}')">Withdraw</button>` : ''}
+        <div style="margin-bottom:0.75rem">
+          <div style="font-family:var(--font-head);font-size:1.4rem">${ev.name}</div>
+          <div class="meta-item mt1">${iconTrack()} ${ev.track} &nbsp;&nbsp; ${iconCal()} ${fmtDate(ev.date)}</div>
+          ${future ? `<span class="badge badge-upcoming" style="margin-top:0.4rem;display:inline-flex">● Upcoming</span>` : `<span class="badge badge-past" style="margin-top:0.4rem;display:inline-flex">● Past</span>`}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:0.4rem">
+          ${enrs.map(enr => `
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:0.5rem 0.75rem;background:var(--dark);border-radius:var(--radius);border:1px solid var(--border)">
+              <span class="badge" style="background:rgba(244,185,66,0.1);color:var(--gold)">${enr.category}</span>
+              ${future ? `<button class="btn btn-danger btn-sm" onclick="unenroll('${enr.id}','${ev.name}','${enr.category}')">Withdraw</button>` : '<span class="text-sub" style="font-size:0.75rem">Completed</span>'}
+            </div>`).join('')}
         </div>
       </div>`;
   }).join('');
@@ -967,106 +995,150 @@ function renderMyEntries() {
 async function openDetailModal(eventId) {
   const ev = allEvents.find(e => e.id === eventId);
   if (!ev) return;
-  const future   = isFuture(ev.date);
-  const enrolled = isEnrolled(eventId);
-  const count    = enrollCount(eventId);
-  const full     = ev.maxEntries > 0 && count >= ev.maxEntries;
+  const future = isFuture(ev.date);
+  const cats   = Array.isArray(ev.categories) ? ev.categories : (ev.category ? [ev.category] : []);
+  const myEnrs = myEnrollmentsForEvent(eventId);
+  const myEnrolledCats = myEnrs.map(e => e.category);
+  const count  = enrollCount(eventId);
 
   document.getElementById('detail-title').textContent = ev.name;
 
-  // Fetch enrollees
+  // Fetch all enrollments for this event with user details
   const enrollSnap = await db.collection('enrollments').where('eventId','==',eventId).get();
-  const enrollees  = enrollSnap.docs.map(d => d.data());
-
-  // Fetch user details
-  const userIds = [...new Set(enrollees.map(e => e.userId))];
-  const userMap = {};
+  const enrollees  = enrollSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  const userIds    = [...new Set(enrollees.map(e => e.userId))];
+  const userMap    = {};
   await Promise.all(userIds.map(async uid => {
     const u = await db.collection('users').doc(uid).get();
     if (u.exists) userMap[uid] = u.data();
   }));
 
-  const enrolleesHtml = enrollees.length ? enrollees.map(e => {
-    const u = userMap[e.userId] || {};
-    const initials = (u.displayName || u.email || '?')[0].toUpperCase();
-    return `
-      <div class="enrollee-row">
-        <div class="enrollee-avatar" style="background:${strColor(e.userId)}">${initials}</div>
-        <div>
-          <div class="enrollee-name">${u.displayName || '—'}</div>
-          <div class="enrollee-email">${u.email || ''}</div>
-        </div>
-        ${canManageEvent(ev) ? `<button class="btn btn-danger btn-sm" style="margin-left:auto" onclick="adminRemoveEnrollment('${e.id}')">Remove</button>` : ''}
-      </div>`;
-  }).join('') : `<p class="text-sub">No drivers enrolled yet.</p>`;
+  // Build per-category enrollee list
+  const enrolleesByCat = {};
+  cats.forEach(c => enrolleesByCat[c] = []);
+  enrollees.forEach(e => {
+    if (enrolleesByCat[e.category]) enrolleesByCat[e.category].push(e);
+    else enrolleesByCat[e.category] = [e]; // handle stale category names
+  });
 
-  const canEnroll = future && !enrolled && !full;
+  const enrolleesHtml = cats.map(cat => {
+    const catEnrs = enrolleesByCat[cat] || [];
+    return `
+      <div style="margin-bottom:1rem">
+        <div style="font-size:0.75rem;font-weight:700;letter-spacing:0.08em;color:var(--gold);text-transform:uppercase;margin-bottom:0.4rem">${cat} — ${catEnrs.length} driver${catEnrs.length!==1?'s':''}</div>
+        ${catEnrs.length ? catEnrs.map(e => {
+          const u = userMap[e.userId] || {};
+          const initials = (u.displayName || u.email || '?')[0].toUpperCase();
+          return `
+            <div class="enrollee-row">
+              <div class="enrollee-avatar" style="background:${strColor(e.userId)}">${initials}</div>
+              <div>
+                <div class="enrollee-name">${u.displayName || '—'}</div>
+                <div class="enrollee-email">${u.email || ''}</div>
+              </div>
+              ${canManageEvent(ev) ? `<button class="btn btn-danger btn-sm" style="margin-left:auto" onclick="adminRemoveEnrollment('${e.id}','${eventId}')">Remove</button>` : ''}
+            </div>`;
+        }).join('') : `<p class="text-sub" style="font-size:0.82rem;padding:0.25rem 0">No drivers yet.</p>`}
+      </div>`;
+  }).join('');
+
+  // Enrollment section for drivers
+  let enrollSection = '';
+  if (future) {
+    const unenrolledCats = cats.filter(c => !myEnrolledCats.includes(c));
+    if (unenrolledCats.length > 0) {
+      enrollSection += `
+        <div style="margin-bottom:1rem">
+          <div class="form-label" style="margin-bottom:0.5rem">Enroll in categories:</div>
+          <div id="enroll-cats" style="display:flex;flex-direction:column;gap:0.4rem">
+            ${unenrolledCats.map(cat => `
+              <label style="display:flex;align-items:center;gap:0.6rem;cursor:pointer;padding:0.5rem 0.75rem;background:var(--dark);border-radius:var(--radius);border:1px solid var(--border)">
+                <input type="checkbox" value="${cat}" style="accent-color:var(--red);width:16px;height:16px">
+                <span style="font-weight:500">${cat}</span>
+              </label>`).join('')}
+          </div>
+          <button class="btn btn-primary w-full" style="margin-top:0.75rem" onclick="enrollSelected('${eventId}')">🏁 Enroll in Selected</button>
+        </div>`;
+    }
+    if (myEnrolledCats.length > 0) {
+      enrollSection += `
+        <div>
+          <div class="form-label" style="margin-bottom:0.5rem">Your enrollments:</div>
+          ${myEnrs.map(enr => `
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:0.5rem 0.75rem;background:var(--dark);border-radius:var(--radius);border:1px solid var(--border);margin-bottom:0.4rem">
+              <span class="badge badge-enrolled">✓ ${enr.category}</span>
+              <button class="btn btn-danger btn-sm" onclick="unenroll('${enr.id}','${ev.name}','${enr.category}')">Withdraw</button>
+            </div>`).join('')}
+        </div>`;
+    }
+    if (!unenrolledCats.length && !myEnrolledCats.length) {
+      enrollSection = `<p class="text-sub" style="text-align:center">No categories available.</p>`;
+    }
+  } else {
+    enrollSection = `<p class="text-sub" style="text-align:center">This event has passed.</p>`;
+  }
 
   document.getElementById('detail-body').innerHTML = `
-    <div style="display:flex;gap:0.75rem;flex-wrap:wrap;margin-bottom:1rem">
-      <span class="badge" style="background:rgba(244,185,66,0.1);color:var(--gold)">${ev.category}</span>
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:1rem">
+      ${cats.map(c=>`<span class="badge" style="background:rgba(244,185,66,0.1);color:var(--gold)">${c}</span>`).join('')}
       ${future ? `<span class="badge badge-upcoming">● Upcoming</span>` : `<span class="badge badge-past">● Past</span>`}
-      ${enrolled ? `<span class="badge badge-enrolled">✓ Enrolled</span>` : ''}
     </div>
     <div class="meta-item" style="margin-bottom:0.5rem">${iconTrack(16)} ${ev.track}</div>
     <div class="meta-item" style="margin-bottom:0.5rem">${iconCal(16)} ${fmtDate(ev.date)}</div>
-    <div class="meta-item" style="margin-bottom:1rem">👥 ${count}${ev.maxEntries ? ' / '+ev.maxEntries : ''} entries</div>
+    <div class="meta-item" style="margin-bottom:1rem">👥 ${count} driver${count!==1?'s':''} enrolled</div>
     ${ev.description ? `<p style="color:var(--sub);font-size:0.875rem;margin-bottom:1rem">${ev.description}</p>` : ''}
     <hr class="divider">
     <h4 style="margin-bottom:0.75rem;font-size:1rem">Enrolled Drivers</h4>
-    <div id="detail-enrollees">${enrolleesHtml}</div>
+    ${enrolleesHtml || '<p class="text-sub">No drivers enrolled yet.</p>'}
     <hr class="divider">
-    ${canEnroll
-      ? `<button class="btn btn-primary w-full" onclick="enroll('${eventId}')">🏁 Enroll in this Event</button>`
-      : enrolled && future
-        ? `<button class="btn btn-danger w-full" onclick="unenrollByEvent('${eventId}')">Withdraw from Event</button>`
-        : full && !enrolled
-          ? `<div class="text-sub" style="text-align:center">This event is full.</div>`
-          : `<div class="text-sub" style="text-align:center">This event has passed.</div>`
-    }
-    ${currentUserData?.role==='admin' || canManageEvent(ev) ? `
-      <div style="display:flex;gap:0.5rem;margin-top:0.75rem">
+    ${enrollSection}
+    ${canManageEvent(ev) ? `
+      <hr class="divider">
+      <div style="display:flex;gap:0.5rem">
         <button class="btn btn-outline w-full" onclick="closeModal('detail-modal');openEventModal('${eventId}')">Edit Event</button>
         <button class="btn btn-danger w-full" onclick="deleteEvent('${eventId}')">Delete</button>
       </div>` : ''}
   `;
-
   openModal('detail-modal');
 }
 
 /* ── ENROLL / UNENROLL ── */
-async function enroll(eventId) {
+async function enrollSelected(eventId) {
   if (!currentUser) return;
+  const checked = [...document.querySelectorAll('#enroll-cats input[type=checkbox]:checked')];
+  if (!checked.length) return toast('Select at least one category.', 'error');
   try {
-    await db.collection('enrollments').add({
-      eventId, userId: currentUser.uid,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    const batch = db.batch();
+    checked.forEach(cb => {
+      const ref = db.collection('enrollments').doc();
+      batch.set(ref, {
+        eventId,
+        userId: currentUser.uid,
+        category: cb.value,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
     });
-    toast('Enrolled successfully! 🏁','success');
+    await batch.commit();
+    toast(`Enrolled in ${checked.map(c=>c.value).join(', ')}! 🏁`, 'success');
     closeModal('detail-modal');
-  } catch(e) { toast(e.message,'error'); }
+  } catch(e) { toast(e.message, 'error'); }
 }
 
-async function unenroll(enrollmentId, eventName) {
-  if (!confirm(`Withdraw from ${eventName}?`)) return;
+async function unenroll(enrollmentId, eventName, category) {
+  if (!confirm(`Withdraw from ${category} at ${eventName}?`)) return;
   try {
     await db.collection('enrollments').doc(enrollmentId).delete();
-    toast('Withdrawn from event.','info');
-  } catch(e) { toast(e.message,'error'); }
+    toast(`Withdrawn from ${category}.`, 'info');
+    closeModal('detail-modal');
+  } catch(e) { toast(e.message, 'error'); }
 }
 
-async function unenrollByEvent(eventId) {
-  const enr = allEnrollments.find(e => e.eventId===eventId && e.userId===currentUser?.uid);
-  if (!enr) return;
-  await unenroll(enr.id, '');
-  closeModal('detail-modal');
-}
-
-async function adminRemoveEnrollment(enrollmentId) {
-  if (!confirm('Remove this driver from the event?')) return;
+async function adminRemoveEnrollment(enrollmentId, eventId) {
+  if (!confirm('Remove this driver from this category?')) return;
   await db.collection('enrollments').doc(enrollmentId).delete();
-  toast('Enrollment removed.','info');
-  closeModal('detail-modal');
+  toast('Enrollment removed.', 'info');
+  // Re-open the detail modal to refresh the view
+  openDetailModal(eventId);
 }
 
 /* ── ADMIN EVENTS TABLE ── */
@@ -1084,13 +1156,15 @@ function renderAdminView() {
     tbody.innerHTML = `<tr><td colspan="6"><div class="empty">No events. Create your first event!</div></td></tr>`;
     return;
   }
-  tbody.innerHTML = allEvents.map(ev => `
+  tbody.innerHTML = allEvents.map(ev => {
+    const cats = Array.isArray(ev.categories) ? ev.categories : (ev.category ? [ev.category] : []);
+    return `
     <tr>
       <td><strong>${ev.name}</strong></td>
       <td>${ev.track}</td>
-      <td><span class="badge" style="background:rgba(244,185,66,0.1);color:var(--gold)">${ev.category}</span></td>
+      <td>${cats.map(c=>`<span class="badge" style="background:rgba(244,185,66,0.1);color:var(--gold);margin-right:2px">${c}</span>`).join('')}</td>
       <td style="font-family:var(--font-mono);font-size:0.78rem">${fmtDate(ev.date)}</td>
-      <td>${enrollCount(ev.id)}${ev.maxEntries ? ' / '+ev.maxEntries : ''}</td>
+      <td>${enrollCount(ev.id)}</td>
       <td>
         <div style="display:flex;gap:0.4rem">
           <button class="btn btn-outline btn-sm" onclick="openDetailModal('${ev.id}')">View</button>
@@ -1099,54 +1173,65 @@ function renderAdminView() {
           <button class="btn btn-danger btn-sm" onclick="deleteEvent('${ev.id}')">Delete</button>` : ''}
         </div>
       </td>
-    </tr>`).join('');
+    </tr>`}).join('');
 }
 
 /* ── EVENT MODAL ── */
 function openEventModal(eventId = null) {
   currentEditEventId = eventId;
   document.getElementById('event-modal-title').textContent = eventId ? 'Edit Event' : 'New Event';
-  const role = currentUserData?.role;
-  const isOwner = role === 'track_owner';
-  const myTracks = isOwner
-    ? allTracks.filter(t => t.ownerId === currentUser?.uid)
-    : [];
 
-  // Show the right track input
+  // Track field: anyone with own tracks gets a dropdown of their tracks; admins get free text
+  const myOwnedTracks = allTracks.filter(t => t.ownerId === currentUser?.uid);
+  const isAdmin = currentUserData?.role === 'admin';
   const trackSelect = document.getElementById('ev-track-select');
   const trackInput  = document.getElementById('ev-track');
-  if (isOwner) {
+
+  if (!isAdmin && myOwnedTracks.length > 0) {
     trackSelect.style.display = 'block';
     trackInput.style.display  = 'none';
-    trackSelect.innerHTML = myTracks.length
-      ? myTracks.map(t => `<option value="${t.name}">${t.name}</option>`).join('')
-      : `<option value="">No tracks yet — create one first</option>`;
+    trackSelect.innerHTML = myOwnedTracks.map(t => `<option value="${t.name}">${t.name}</option>`).join('');
   } else {
     trackSelect.style.display = 'none';
     trackInput.style.display  = 'block';
-    // Populate datalist with all known tracks
-    const trackNames = [...new Set(allEvents.map(e=>e.track))];
+    const trackNames = [...new Set(allTracks.map(t=>t.name))];
     document.getElementById('tracks-datalist').innerHTML = trackNames.map(t=>`<option value="${t}">`).join('');
   }
+
+  // Reset categories
+  document.querySelectorAll('.ev-cat-cb').forEach(cb => cb.checked = false);
+  document.getElementById('ev-custom-cat').value = '';
+  document.getElementById('ev-custom-cat-wrap').style.display = 'none';
 
   if (eventId) {
     const ev = allEvents.find(e => e.id === eventId);
     if (ev) {
-      document.getElementById('ev-name').value     = ev.name || '';
-      document.getElementById('ev-category').value = ev.category || '';
-      document.getElementById('ev-max').value      = ev.maxEntries || 0;
-      document.getElementById('ev-desc').value     = ev.description || '';
-      if (isOwner) trackSelect.value = ev.track || '';
-      else         trackInput.value  = ev.track || '';
+      document.getElementById('ev-name').value = ev.name || '';
+      document.getElementById('ev-max').value  = ev.maxEntries || 0;
+      document.getElementById('ev-desc').value = ev.description || '';
+      if (!isAdmin && myOwnedTracks.length > 0) trackSelect.value = ev.track || '';
+      else trackInput.value = ev.track || '';
       if (ev.date) {
         const d = ev.date.toDate ? ev.date.toDate() : new Date(ev.date);
         document.getElementById('ev-date').value = d.toISOString().slice(0,16);
       }
+      // Restore categories
+      const cats = Array.isArray(ev.categories) ? ev.categories : (ev.category ? [ev.category] : []);
+      const presets = ['Nitro','Electric','Truggy','BYO'];
+      cats.forEach(cat => {
+        const cb = document.querySelector(`.ev-cat-cb[value="${cat}"]`);
+        if (cb) cb.checked = true;
+        else if (!presets.includes(cat)) {
+          // It's a custom category
+          document.getElementById('ev-custom-cat').value = cat;
+          document.querySelector('.ev-cat-cb[value="Custom"]').checked = true;
+          document.getElementById('ev-custom-cat-wrap').style.display = 'block';
+        }
+      });
     }
   } else {
     ['ev-name','ev-date','ev-desc'].forEach(id => document.getElementById(id).value='');
-    if (!isOwner) trackInput.value = '';
-    document.getElementById('ev-category').value = '';
+    if (isAdmin || myOwnedTracks.length === 0) trackInput.value = '';
     document.getElementById('ev-max').value = 0;
   }
   closeModal('detail-modal');
@@ -1154,18 +1239,32 @@ function openEventModal(eventId = null) {
 }
 
 async function saveEvent() {
-  const name     = document.getElementById('ev-name').value.trim();
-  const isOwner  = currentUserData?.role === 'track_owner';
-  const track    = isOwner
+  const name    = document.getElementById('ev-name').value.trim();
+  const isAdmin = currentUserData?.role === 'admin';
+  const myOwnedTracks = allTracks.filter(t => t.ownerId === currentUser?.uid);
+  const track   = (!isAdmin && myOwnedTracks.length > 0)
     ? document.getElementById('ev-track-select').value.trim()
     : document.getElementById('ev-track').value.trim();
-  const category = document.getElementById('ev-category').value;
-  const dateVal  = document.getElementById('ev-date').value;
-  const maxEnt   = parseInt(document.getElementById('ev-max').value) || 0;
-  const desc     = document.getElementById('ev-desc').value.trim();
-  if (!name||!track||!category||!dateVal) return toast('Please fill all required fields.','error');
+  const dateVal = document.getElementById('ev-date').value;
+  const maxEnt  = parseInt(document.getElementById('ev-max').value) || 0;
+  const desc    = document.getElementById('ev-desc').value.trim();
+
+  // Collect categories
+  const categories = [];
+  document.querySelectorAll('.ev-cat-cb:checked').forEach(cb => {
+    if (cb.value === 'Custom') {
+      const custom = document.getElementById('ev-custom-cat').value.trim();
+      if (custom) categories.push(custom);
+    } else {
+      categories.push(cb.value);
+    }
+  });
+
+  if (!name || !track || !dateVal) return toast('Please fill all required fields.', 'error');
+  if (!categories.length) return toast('Select at least one category.', 'error');
+
   const data = {
-    name, track, category,
+    name, track, categories,
     date: firebase.firestore.Timestamp.fromDate(new Date(dateVal)),
     maxEntries: maxEnt,
     description: desc,
@@ -1174,16 +1273,15 @@ async function saveEvent() {
   try {
     if (currentEditEventId) {
       await db.collection('events').doc(currentEditEventId).update(data);
-      toast('Event updated.','success');
+      toast('Event updated.', 'success');
     } else {
       data.createdAt = firebase.firestore.FieldValue.serverTimestamp();
       data.ownerId   = currentUser.uid;
       await db.collection('events').add(data);
-      toast('Event created! 🏁','success');
+      toast('Event created! 🏁', 'success');
     }
     closeModal('event-modal');
-    renderAdminView();
-  } catch(e) { toast(e.message,'error'); }
+  } catch(e) { toast(e.message, 'error'); }
 }
 
 async function deleteEvent(eventId) {
@@ -1232,12 +1330,14 @@ function renderMyTracksView() {
             <table>
               <thead><tr><th>Event</th><th>Category</th><th>Date</th><th>Entries</th><th></th></tr></thead>
               <tbody>
-                ${trackEvents.map(ev => `
+                ${trackEvents.map(ev => {
+                  const cats = Array.isArray(ev.categories) ? ev.categories : (ev.category ? [ev.category] : []);
+                  return `
                   <tr>
                     <td><strong>${ev.name}</strong></td>
-                    <td><span class="badge" style="background:rgba(244,185,66,0.1);color:var(--gold)">${ev.category}</span></td>
+                    <td>${cats.map(c=>`<span class="badge" style="background:rgba(244,185,66,0.1);color:var(--gold);margin-right:2px">${c}</span>`).join('')}</td>
                     <td style="font-family:var(--font-mono);font-size:0.78rem">${fmtDate(ev.date)}</td>
-                    <td>${enrollCount(ev.id)}${ev.maxEntries ? ' / '+ev.maxEntries : ''}</td>
+                    <td>${enrollCount(ev.id)}</td>
                     <td>
                       <div style="display:flex;gap:0.35rem">
                         <button class="btn btn-outline btn-sm" onclick="openDetailModal('${ev.id}')">View</button>
@@ -1245,7 +1345,7 @@ function renderMyTracksView() {
                         <button class="btn btn-danger btn-sm" onclick="deleteEvent('${ev.id}')">Del</button>
                       </div>
                     </td>
-                  </tr>`).join('')}
+                  </tr>`;}).join('')}
               </tbody>
             </table>
           </div>` : `<p class="text-sub" style="font-size:0.85rem">No events at this track yet.</p>`}
@@ -1342,7 +1442,7 @@ function renderAdminUsers() {
         <td>
           ${isSelf ? `<span class="text-sub">You</span>` : `
           <select class="form-control" style="width:auto;padding:0.3rem 0.6rem;font-size:0.8rem"
-            onchange="setRole('${u.email}', this.value, this)">
+            onchange="setRole('${u.email}', this.value)">
             <option value="driver"      ${u.role==='driver'      ?'selected':''}>Driver</option>
             <option value="track_owner" ${u.role==='track_owner' ?'selected':''}>Track Owner</option>
             <option value="admin"       ${u.role==='admin'       ?'selected':''}>Admin</option>
@@ -1352,7 +1452,7 @@ function renderAdminUsers() {
   }).join('');
 }
 
-async function setRole(email, newRole, selectEl) {
+async function setRole(email, newRole) {
   try {
     const snap = await db.collection('users').where('email','==',email).limit(1).get();
     if (snap.empty) return toast('User not found.','error');
